@@ -1,0 +1,129 @@
+############################################################################
+# vendor/beken/chip/bk7236n/src/Make.defs
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.  The
+# ASF licenses this file to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance with the
+# License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+# WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+# License for the specific language governing permissions and limitations
+# under the License.
+#
+############################################################################
+
+# We need to select arch Make.defs according to chip arch
+# eg: risc-v/Make.defs, armv8-m/Make.defs
+
+include armv8-m/Make.defs
+
+# Specify our HEAD assembly file.  This will be linked as
+# the first object file, so it will appear at address 0
+
+#HEAD_ASRC = beken_head.S
+
+LDFLAGS += --build-id=none --entry=Reset_Handler
+
+#CHIP_ASRCS = vectors.S
+
+BK_IDK_PATH_RELA_TO_SRC = ../../../../vendor/beken/chips/bk7236n
+
+INCLUDES += ${INCDIR_PREFIX}$(BK_IDK_PATH_RELA_TO_SRC)/bk_idk/armino_as_lib/include
+INCLUDES += ${INCDIR_PREFIX}$(BK_IDK_PATH_RELA_TO_SRC)/bk_idk/armino_as_lib/bk7236n/config
+
+# beken_interrupt_base.c is built outside libarch.a and whole-archived at link
+# time so its strong symbols override weak stubs in armino_as_lib.
+BEKEN_INTERRUPT_BASE_SRC = beken_interrupt_base.c
+BEKEN_INTERRUPT_BASE_OBJ = beken_interrupt_base$(OBJEXT)
+
+CHIP_CSRCS = beken_start.c beken_irq.c beken_lowputc.c beken_uart.c
+CHIP_CSRCS += beken_allocateheap.c beken_timerisr.c beken_os_adapt.c
+CHIP_CSRCS += beken_idle.c
+
+ifeq ($(CONFIG_PM),y)
+CHIP_CSRCS += beken_pminitialize.c
+endif
+
+ifeq ($(CONFIG_RTC_DRIVER),y)
+CHIP_CSRCS += beken_rtc_lowerhalf.c
+endif
+
+ifeq ($(CONFIG_BK7236N_FLASH_MTD),y)
+CHIP_CSRCS += beken_flash.c
+endif
+
+ifeq ($(CONFIG_TIMER),y)
+CHIP_CSRCS += beken_tim_lowerhalf.c
+endif
+
+ifeq ($(CONFIG_ONESHOT),y)
+CHIP_CSRCS += beken_oneshot_lowerhalf.c
+endif
+
+ifeq ($(CONFIG_SPI_DRIVER),y)
+CHIP_CSRCS += beken_spi.c
+endif
+
+ifeq ($(CONFIG_SPI_SLAVE_DRIVER),y)
+CHIP_CSRCS += beken_spi_slave.c
+endif
+
+ifeq ($(CONFIG_WATCHDOG),y)
+CHIP_CSRCS += beken_wdt_lowerhalf.c
+endif
+
+ifneq ($(filter y,$(CONFIG_PWM) $(CONFIG_CAPTURE)),)
+CHIP_CSRCS += beken_pwm_lowerhalf.c
+endif
+
+ifeq ($(CONFIG_ADC),y)
+CHIP_CSRCS += beken_adc_lowerhalf.c
+endif
+
+ifeq ($(CONFIG_I2C_DRIVER),y)
+CHIP_CSRCS += beken_i2c_lowerhalf.c
+endif
+
+ifneq ($(filter y,$(CONFIG_DEV_RANDOM) $(CONFIG_DEV_URANDOM_ARCH)),)
+CHIP_CSRCS += beken_trng_lowerhalf.c
+endif
+
+ifeq ($(CONFIG_NET),y)
+ifeq ($(CONFIG_BK7236N_WIFI),y)
+CHIP_CSRCS += beken_wlan.c
+endif
+ifneq ($(CONFIG_NETDEV_LATEINIT),y)
+CHIP_CSRCS += beken_netinit.c
+endif
+endif
+
+ifeq ($(CONFIG_CRYPTO),y)
+CHIP_CSRCS += beken_crypto.c beken_aes.c
+endif
+
+CFLAGS += -DCONFIG_DEBUG_FIRMWARE=0 -DCONFIG_SOC_BK7234=0 -DCONFIG_BK_WHILE=0 -DCONFIG_MEM_DEBUG=0 -DCONFIG_GPIO_RETENTION_SUPPORT=0 -DCONFIG_ARCH_RISCV=0 -DCONFIG_AON_RTC_DEBUG=0 -DSARADC_AUTOTEST=0
+
+CFLAGS += -DCONFIG_FREERTOS_SMP_TEMP=0 -DCONFIG_MALLOC_STATIS=0 -DCONFIG_INCLUDE_WPA2_ENTERPRISE=0 -DCONFIG_STDIO_PRINTF=0 -DCONFIG_DUMP_ENABLE=0 -DCONFIG_SOC_BK7231N=0
+
+CFLAGS += -DCONFIG_FREERTOS=0 -DCONFIG_SUPPORT_LOG_LEVEL_CFG=0 -DCONFIG_GPIO_DEFAULT_SET_SUPPORT=0 -DCONFIG_GPIO_ANA_WAKEUP_SUPPORT=0
+CFLAGS += -DCONFIG_CAN=0 -DCONFIG_LCD=0 -DCONFIG_AUDIO=0 -DCONFIG_LIN=0 -DCONFIG_SYS_CPU1=0 -DCONFIG_SOC_BK7236=0
+CFLAGS += -DCONFIG_WIFI_BAND_POLICY=0 -DCONFIG_WIFI_STA_SAME_SSID_BAND_PREF=0 -DCONFIG_WIFI_AP_HW_MODE=0 -DCONFIG_WIFI_WIRELESS_MODE_SUPPORT=0 -DCONFIG_WIFI_CSI_EN=0
+CFLAGS += -DCONFIG_FLASH_V1P1=0 -DCONFIG_SUPPORT_XMIT_READY_CALLBACK=0 -DCONFIG_FLASH_OTP=0
+CFLAGS += -DCONFIG_AON_RTC_64BIT=0 -DCONFIG_AON_RTC=0 -DCONFIG_RTC_ANA_WAKEUP_SUPPORT=0
+CFLAGS += -DCONFIG_DEEP_LV=0 -DCONFIG_TOUCH=0 -DCONFIG_JPEGENC_HW=0 -DCONFIG_JPEGDEC_HW=0 -DCONFIG_SPI_BYTE_INTERVAL=0
+CFLAGS += -Wno-error=strict-prototypes
+
+EXTRA_LIBS := --whole-archive $(BEKEN_INTERRUPT_BASE_OBJ) --no-whole-archive $(EXTRA_LIBS)
+EXTRADELFILE += $(BEKEN_INTERRUPT_BASE_OBJ)
+
+$(BEKEN_INTERRUPT_BASE_OBJ): $(BEKEN_INTERRUPT_BASE_SRC)
+	$(call COMPILE, $<, $@)
+
+$(BIN): $(BEKEN_INTERRUPT_BASE_OBJ)
+nuttx$(EXEEXT): $(BEKEN_INTERRUPT_BASE_OBJ)

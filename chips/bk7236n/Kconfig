@@ -1,0 +1,107 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+
+if ARCH_CHIP_CUSTOM
+
+comment "BEKEN Configuration Options"
+
+choice
+	prompt "BEKEN Chip Selection"
+	default ARCH_CHIP_BK7236N
+
+config ARCH_CHIP_BK7236N
+	bool "bk7236n"
+	select ARCH_CORTEXM33
+	select ARCH_HAVE_CUSTOM_VECTORS
+	select ARCH_HAVE_MPU
+	select ARM_HAVE_MPU_UNIFIED
+	#select ARCH_HAVE_FPU
+	select ARCH_HAVE_RNG
+	select BK7236N_FLASH
+	select BK7236N_MTD_PARTITION
+	select ARMV8M_HAVE_ICACHE
+	select ARMV8M_HAVE_DCACHE
+	select ARMV8M_ICACHE
+	select ARMV8M_DCACHE
+
+endchoice
+
+config BK7236N_FLASH
+	bool
+	default y
+
+if BK7236N_FLASH
+
+comment "General storage MTD configuration"
+
+config BK7236N_FLASH_SIZE
+	hex "BK7236N flash size, 4MB by default"
+	default 0x400000
+
+config BK7236N_FLASH_SECTOR_SIZE
+	hex "BK7236N sector size, minimum 4KB by default"
+	default 0x1000
+
+config BK7236N_FLASH_ERASE_STATE
+	hex "BK7236N flash erase state"
+	default 0xff
+
+config BK7236N_FLASH_MTD
+	bool "MTD driver"
+	default y
+	select MTD
+	select MTD_BYTE_WRITE
+	select MTD_PARTITION
+	---help---
+		Initialize an MTD driver for the on-chip Flash, which will
+		add an entry at /dev for application access from userspace.
+
+config BK7236N_FLASH_MTD_BLKSIZE
+	hex "Storage MTD block size"
+	default 0x1000
+	depends on BK7236N_FLASH_MTD
+
+endif
+
+config BK7236N_MTD_PARTITION
+	bool
+	default y
+
+if BK7236N_MTD_PARTITION
+
+comment "MTD partition configuration"
+
+config BK7236N_MTD_PARTITION_OFFSET
+	hex "MTD partition offset"
+	default 0x300000
+	depends on BK7236N_FLASH_MTD
+
+config BK7236N_MTD_PARTITION_SIZE
+	hex "MTD partition size, 32KB by default"
+	default 0x80000
+	depends on BK7236N_FLASH_MTD
+
+config BK7236N_MTD_PARTITION_DEVPATH
+	string "MTD partition device path"
+	default "/dev/mtdnvs_flash"
+	depends on BK7236N_FLASH_MTD
+
+endif
+
+config BK7236N_WIFI
+	bool "Initialize Beken Wi-Fi driver and register the netcard"
+	default n
+	select NETDEV_WIRELESS_IOCTL
+	select NETDEV_WIRELESS_HANDLER
+	select WIRELESS_WAPI
+	select WIRELESS_WAPI_CMDTOOL
+	select NETINIT_DHCPC
+	select SYSTEM_DHCPC_RENEW
+
+config BK7236N_BLE
+	bool "Initialize Beken BLE driver"
+	default n
+
+endif
