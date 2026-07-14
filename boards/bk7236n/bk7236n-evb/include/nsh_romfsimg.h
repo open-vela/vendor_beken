@@ -18,8 +18,8 @@
  *
  ****************************************************************************/
 
-#ifndef __BOARDS_BK7236N_BK7236N_EVB_INCLUDE_NSH_ROMFSIMG_H
-#define __BOARDS_BK7236N_BK7236N_EVB_INCLUDE_NSH_ROMFSIMG_H
+#ifndef __VENDOR_BEKEN_BOARDS_BK7236N_BK7236N_EVB_INCLUDE_NSH_ROMFSIMG_H
+#define __VENDOR_BEKEN_BOARDS_BK7236N_BK7236N_EVB_INCLUDE_NSH_ROMFSIMG_H
 extern const unsigned char romfs_img[];
 extern const unsigned int romfs_img_len;
 #endif
