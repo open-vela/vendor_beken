@@ -1,0 +1,31 @@
+#
+# For a description of the syntax of this configuration file,
+# see the file kconfig-language.txt in the NuttX tools repository.
+#
+# BK7258 DevKit board configuration options
+#
+
+if ARCH_BOARD_CUSTOM
+
+config BK7258_DEVKIT_LCD
+	bool "Enable BK7258 DevKit QSPI LCD"
+	default n
+	# TODO(M3): add dependencies per panel type, e.g.:
+	# select SPI
+	# select LCD
+	# select LCD_DEV
+	# select LCD_FRAMEBUFFER
+	---help---
+		Enable the on-board QSPI LCD support (M3, requires M1/M2 first).
+		See vendor/espressif/boards/esp32s3/esp32s3-eye for a ST7789 +
+		LCD_FRAMEBUFFER reference.
+
+config LCD_GC9D01
+	bool "GC9D01 160x160 RGB565 LCD (bit-bang SPI)"
+	default n
+	---help---
+		Enable the GC9D01 160x160 round LCD on the BK7258 DevKit.
+		Uses bit-bang SPI on QSPI1 pins (GPIO 2-5) with separate
+		DC pin.  Fills screen with red on boot as a smoke test.
+
+endif # ARCH_BOARD_CUSTOM
