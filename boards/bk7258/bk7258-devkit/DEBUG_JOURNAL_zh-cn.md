@@ -1362,3 +1362,135 @@ ana_write(ANA_REG_Y, v2);
 - 🟡 与喇叭同时工作时需验证回声/啸叫(结构上应隔离麦腔与喇叭腔;必要时启用芯片 AEC)
 
 > 待续:🔵 外壳定位后标定间距 → 48kHz + 亚采样插值 → DMA 化 → 与表情引擎联动做"听觉引导视觉"。
+
+---
+
+## 22. 系统 tick 从未使能(一个空宏吃掉了整行代码)
+
+**日期**:2026-08-14　**症状**:`sleep 3` 永久挂住;所有耗时测量恒为 0
+
+### 22.1 怎么发现的
+
+做 S4(`psram_memalign`)验证时,`psram fbtest` 打出的吞吐是 `0.0 / 0.0 KB/s`。
+第一反应是打印格式或计时接口用错,于是把应用侧计时从 `clock_systime_ticks()`
+换成 `clock_gettime(CLOCK_MONOTONIC)`,并把实测耗时一起打出来 —— 结果是 **0 ms**。
+
+614KB 逐字节读写不可能在 0 ms 内完成(那意味着 6 亿次访问/秒),所以问题必然在时间基准。
+决定性验证:`sleep 3` **永久挂住**(等了几分钟没返回)。tick 不走 → 看门狗定时器不到期 → 永久阻塞。
+
+> 教训:**先证明时间基准可信,再相信任何性能数字**。
+> 我们之前记录的"PSRAM 写 1768 KB/s / 读 1802 KB/s"就是在 tick 不走的情况下得出的,
+> 完全无效,而且已经被当成架构决策的依据写进了 5 份文档。
+
+### 22.2 根因
+
+`bk7258_timerisr.c` 里的原实现:
+
+```c
+void up_timer_initialize(void)
+{
+  putreg32(SYSTICK_RELOAD, NVIC_SYSTICK_RELOAD);
+  up_timer_set_lowerhalf(systick_initialize(true, BOARD_SYSTICK_CLOCK, -1));
+}
+```
+
+看起来很完整。但 `include/nuttx/timers/arch_timer.h`:
+
+```c
+#ifdef CONFIG_TIMER_ARCH
+void up_timer_set_lowerhalf(struct timer_lowerhalf_s *lower);
+#else
+#  define up_timer_set_lowerhalf(lower)      /* ← 空宏 */
+#endif
+```
+
+本板 **`CONFIG_TIMER` / `CONFIG_TIMER_ARCH` 都没开**,于是这个宏展开为空 ——
+**函数式宏会连同它的实参一起被丢弃**,也就是 `systick_initialize(...)` 这次调用
+在预处理阶段就消失了。最终效果:只写了一个 RELOAD 寄存器,SysTick 既没使能、
+也没挂中断处理函数,`g_system_timer` 从开机起一直是 0。
+
+为什么一直没被发现:**系统照常启动、NSH 照常可用**(控制台是中断驱动的,不依赖 tick),
+只有 `sleep`/超时/时间片这些依赖 tick 的功能是死的,而 bring-up 阶段几乎没用到。
+
+### 22.3 修复
+
+不依赖 `CONFIG_TIMER_ARCH`,直接走经典 tick ISR(参考 `arch/arm/src/at32/at32_timerisr.c`):
+
+```c
+static int bk7258_timerisr(int irq, uint32_t *regs, void *arg)
+{
+  nxsched_process_timer();
+  return 0;
+}
+
+void up_timer_initialize(void)
+{
+  /* 设 SysTick 异常优先级 */
+  regval  = getreg32(NVIC_SYSH12_15_PRIORITY);
+  regval &= ~NVIC_SYSH_PRIORITY_PR15_MASK;
+  regval |= (NVIC_SYSH_PRIORITY_DEFAULT << NVIC_SYSH_PRIORITY_PR15_SHIFT);
+  putreg32(regval, NVIC_SYSH12_15_PRIORITY);
+
+  putreg32(SYSTICK_RELOAD, NVIC_SYSTICK_RELOAD);
+  putreg32(0, NVIC_SYSTICK_CURRENT);
+  irq_attach(BK7258_IRQ_SYSTICK, (xcpt_t)bk7258_timerisr, NULL);
+  putreg32(NVIC_SYSTICK_CTRL_CLKSOURCE | NVIC_SYSTICK_CTRL_TICKINT |
+           NVIC_SYSTICK_CTRL_ENABLE, NVIC_SYSTICK_CTRL);
+  up_enable_irq(BK7258_IRQ_SYSTICK);
+}
+```
+
+并加了 24 位 RELOAD 的编译期检查(`#if SYSTICK_RELOAD > 0x00ffffff #error`)。
+
+**验证手段**:烧录后用 `arm-none-eabi-objdump -d --disassemble=up_timer_initialize`
+核对生成代码 —— 确认写入了 `RELOAD=0x124f7f`、`CTRL=7`(CLKSOURCE|TICKINT|ENABLE)、
+`irq_attach(15, ...)`。**不要只看源码,要看编译出来的指令**,这次的坑正是源码看着对、
+编译结果不对。
+
+### 22.4 顺带校准出真实主频(第二个坑)
+
+修好 tick 后 `sleep` 能返回了,但**慢 4 倍**:`sleep 3` 用 12 s,`sleep 10` 用 40 s,
+比值精确 4.0。SysTick 用处理器时钟(CTRL.CLKSOURCE=1),所以
+
+```
+真实核心时钟 = 480 MHz / 4 = 120 MHz
+```
+
+`board.h` 原来写 `BOARD_CPU_FREQUENCY 480000000 /* DPLL output */`,旁边还留着
+`TODO(calibrate)` —— **480 MHz 是 DPLL 输出/最大额定值,不是复位后的核心时钟**。
+改成 120 MHz 后 `sleep 10` 实测 10 s。480 MHz 保留为 `BOARD_DPLL_FREQUENCY`。
+
+> 通用做法:**没有独立时基时,用 `sleep N` + 秒表反推主频**。
+> 比值是整数(这里 4.0)基本就能确认是分频关系,而不是随机误差。
+
+### 22.5 修复后重测 PSRAM 带宽(替换全部旧数字)
+
+| 访问方式 | 写 | 读 | 条件 |
+|---|---|---|---|
+| 32 位字 `psram test 16` | **11.3 MB/s** | **8.5 MB/s** | 16MB 全范围、4194304 words、**0 错误**、3.30 s |
+| 8 位字节 `psram fbtest` | **4.0–4.3 MB/s** | **3.5 MB/s** | 614KB×2、32/64 对齐各一轮、150/170 ms |
+
+- **访问宽度影响巨大**:32 位吞吐是 8 位的 2.4–2.7 倍(每次总线事务固定开销远大于数据本身)
+  → 能用 32 位就别逐字节 memcpy。
+- 折算帧时间:614KB 全帧 CPU 读一遍 **72 ms → 全帧处理天花板约 14 fps**;
+  320×240(154KB)只要 18 ms。这是 M3 摄像头链路的设计前提。
+- 架构结论**不变**(LCD 帧缓冲留 SRAM、PSRAM 专供摄像头),但依据从"PSRAM 只有 1.8MB/s"
+  换成"双眼 100KB 放 PSRAM 光读就吃掉 30fps 预算的 36%,而 614KB 在 336K SRAM 里放不下"。
+
+### 22.6 同批修掉的小缺陷
+
+| 缺陷 | 后果 | 修法 |
+|---|---|---|
+| `bk7258_psram_memalign(0, n)` | `mm_memalign` 的幂判断 `(a & -a) != a` 放行 0,随后 `DEBUGASSERT(ptr % 0)` 除零 | 入口拒绝 0 与非 2 的幂,返回 NULL + 日志 |
+| NSH `psram align 0 64` | 应用侧 `ptr % align` 同样除零 | 取参后立即校验 |
+| `clock_systime_ticks()` 隐式声明 | 编译器按返回 `int` 处理;且该接口是 OS 内部接口 | 应用改用 `clock_gettime(CLOCK_MONOTONIC)` |
+| `arm_boardinitialize()` 无原型 | 隐式 int 声明,类型不检查(实体在板级目录,链接能过) | 在 `bk7258_start.h` 补声明 |
+| `-Wshadow` / `%04x` 打 `uint32_t` | 编译告警 | 清零告警 |
+
+### 22.7 状态
+
+- ✅ tick 正常:`sleep 10` = 10 s,`uptime` 递增,`CLOCK_MONOTONIC` 可用
+- ✅ S4 全项通过:`align 32/64` mod=0、非法对齐干净报错、`fbtest` 两轮通过、
+  `alias`/`width`/`test` 被 `-EBUSY` 堆护栏挡住、`freeall` 无碎片
+- ✅ 主频 120 MHz 已写入 board.h 并注明校准方法
+- 🟡 待办:PSRAM 用 DMA 而非 CPU 搬运(拿真实带宽);启用 D-cache 后必须补 invalidate
